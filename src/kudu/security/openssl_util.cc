@@ -17,35 +17,41 @@
 
 #include "kudu/security/openssl_util.h"
 
+#include <cstdio>
+#include <cstdlib>
 #include <mutex>
 #include <sstream>
 #include <string>
-#include <vector>
 
+#include <glog/logging.h>
 #include <openssl/err.h>
 #include <openssl/rand.h>
 #include <openssl/ssl.h>
 
+#include "kudu/gutil/strings/substitute.h"
 #include "kudu/util/debug/leakcheck_disabler.h"
+#include "kudu/util/errno.h"
 #include "kudu/util/mutex.h"
+#include "kudu/util/status.h"
 #include "kudu/util/thread.h"
 
 using std::ostringstream;
 using std::string;
-using std::vector;
+using strings::Substitute;
 
 namespace kudu {
 namespace security {
 
 namespace {
 
-vector<Mutex*> kCryptoLocks;
+// Array of locks used by OpenSSL.
+// We use an intentionally-leaked C-style array here to avoid non-POD static data.
+Mutex* kCryptoLocks = nullptr;
 
 // Lock/Unlock the nth lock. Only to be used by OpenSSL.
 void LockingCB(int mode, int type, const char* /*file*/, int /*line*/) {
-  DCHECK(!kCryptoLocks.empty());
-  Mutex* m = kCryptoLocks[type];
-  DCHECK(m);
+  DCHECK(kCryptoLocks);
+  Mutex* m = &kCryptoLocks[type];
   if (mode & CRYPTO_LOCK) {
     m->lock();
   } else {
@@ -59,8 +65,8 @@ void ThreadIdCB(CRYPTO_THREADID* tid) {
 }
 
 void DoInitializeOpenSSL() {
-  SSL_library_init();
   SSL_load_error_strings();
+  SSL_library_init();
   OpenSSL_add_all_algorithms();
   RAND_poll();
 
@@ -68,16 +74,15 @@ void DoInitializeOpenSSL() {
   // LSAN warnings.
   debug::ScopedLeakCheckDisabler d;
   int num_locks = CRYPTO_num_locks();
-  kCryptoLocks.reserve(num_locks);
-  for (int i = 0; i < num_locks; i++) {
-    kCryptoLocks.emplace_back(new Mutex());
-  }
+  CHECK(!kCryptoLocks);
+  kCryptoLocks = new Mutex[num_locks];
 
   // Callbacks used by OpenSSL required in a multi-threaded setting.
   CRYPTO_set_locking_callback(LockingCB);
   CRYPTO_THREADID_set_callback(ThreadIdCB);
 }
-} // namespace
+
+} // anonymous namespace
 
 void InitializeOpenSSL() {
   static std::once_flag ssl_once;
@@ -105,6 +110,40 @@ string GetOpenSSLErrors() {
     }
   }
   return serr.str();
+}
+
+string GetSSLErrorDescription(int error_code) {
+  switch (error_code) {
+    case SSL_ERROR_NONE: return "";
+    case SSL_ERROR_ZERO_RETURN: return "SSL_ERROR_ZERO_RETURN";
+    case SSL_ERROR_WANT_READ: return "SSL_ERROR_WANT_READ";
+    case SSL_ERROR_WANT_WRITE: return "SSL_ERROR_WANT_WRITE";
+    case SSL_ERROR_WANT_CONNECT: return "SSL_ERROR_WANT_CONNECT";
+    case SSL_ERROR_WANT_ACCEPT: return "SSL_ERROR_WANT_ACCEPT";
+    case SSL_ERROR_WANT_X509_LOOKUP: return "SSL_ERROR_WANT_X509_LOOKUP";
+    case SSL_ERROR_SYSCALL: {
+      string queued_error = GetOpenSSLErrors();
+      if (!queued_error.empty()) {
+        return queued_error;
+      }
+      return kudu::ErrnoToString(errno);
+    };
+    default: return GetOpenSSLErrors();
+  }
+}
+
+const string& DataFormatToString(DataFormat fmt) {
+  static const string kStrFormatUnknown = "UNKNOWN";
+  static const string kStrFormatDer = "DER";
+  static const string kStrFormatPem = "PEM";
+  switch (fmt) {
+    case DataFormat::DER:
+      return kStrFormatDer;
+    case DataFormat::PEM:
+      return kStrFormatPem;
+    default:
+      return kStrFormatUnknown;
+  }
 }
 
 } // namespace security

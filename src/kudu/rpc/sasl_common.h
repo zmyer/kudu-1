@@ -36,7 +36,6 @@ namespace rpc {
 using std::string;
 
 // Constants
-extern const char* const kSaslMechAnonymous;
 extern const char* const kSaslMechPlain;
 extern const char* const kSaslMechGSSAPI;
 
@@ -54,7 +53,7 @@ extern const char* const kSaslMechGSSAPI;
 //
 // This function is thread safe and uses a static lock.
 // This function should NOT be called during static initialization.
-Status SaslInit(const char* app_name);
+Status SaslInit();
 
 // Disable Kudu's initialization of SASL. See equivalent method in client.h.
 Status DisableSaslInitialization();
@@ -102,7 +101,6 @@ struct SaslNegotiationState {
 struct SaslMechanism {
   enum Type {
     INVALID,
-    ANONYMOUS,
     PLAIN,
     GSSAPI
   };

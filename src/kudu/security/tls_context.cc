@@ -15,40 +15,46 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "kudu/security/ssl_factory.h"
+#include "kudu/security/tls_context.h"
 
-#include <mutex>
-#include <vector>
+#include <string>
 
 #include <openssl/err.h>
 #include <openssl/ssl.h>
-#include <openssl/x509v3.h>
 
+#include "kudu/gutil/strings/substitute.h"
 #include "kudu/security/openssl_util.h"
-#include "kudu/security/ssl_socket.h"
-#include "kudu/util/debug/leakcheck_disabler.h"
-#include "kudu/util/mutex.h"
-#include "kudu/util/thread.h"
+#include "kudu/security/tls_handshake.h"
+#include "kudu/util/status.h"
+
+using strings::Substitute;
+using std::string;
 
 namespace kudu {
+namespace security {
 
-SSLFactory::SSLFactory() : ctx_(nullptr, SSL_CTX_free) {
+template<> struct SslTypeTraits<SSL> {
+  static constexpr auto free = &SSL_free;
+};
+template<> struct SslTypeTraits<SSL_CTX> {
+  static constexpr auto free = &SSL_CTX_free;
+};
+
+TlsContext::TlsContext() {
   security::InitializeOpenSSL();
 }
 
-SSLFactory::~SSLFactory() {
-}
+Status TlsContext::Init() {
+  CHECK(!ctx_);
 
-Status SSLFactory::Init() {
-  CHECK(!ctx_.get());
   // NOTE: 'SSLv23 method' sounds like it would enable only SSLv2 and SSLv3, but in fact
   // this is a sort of wildcard which enables all methods (including TLSv1 and later).
   // We explicitly disable SSLv2 and SSLv3 below so that only TLS methods remain.
   // See the discussion on https://trac.torproject.org/projects/tor/ticket/11598 for more
   // info.
-  ctx_.reset(SSL_CTX_new(SSLv23_method()));
+  ctx_ = ssl_make_unique(SSL_CTX_new(SSLv23_method()));
   if (!ctx_) {
-    return Status::RuntimeError("Could not create SSL context");
+    return Status::RuntimeError("failed to create TLS context", GetOpenSSLErrors());
   }
   SSL_CTX_set_mode(ctx_.get(), SSL_MODE_AUTO_RETRY);
 
@@ -62,60 +68,68 @@ Status SSLFactory::Init() {
   SSL_CTX_set_options(ctx_.get(),
                       SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 |
                       SSL_OP_NO_COMPRESSION);
-  SSL_CTX_set_verify(ctx_.get(),
-      SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT | SSL_VERIFY_CLIENT_ONCE, nullptr);
+
+  // TODO(PKI): is it possible to disable client-side renegotiation? it seems there
+  // have been various CVEs related to this feature that we don't need.
+  // TODO(PKI): set desired cipher suites?
   return Status::OK();
 }
 
-std::string SSLFactory::GetLastError(int errno_copy) {
-  int error_code = ERR_get_error();
-  if (error_code == 0) return kudu::ErrnoToString(errno_copy);
-  const char* error_reason = ERR_reason_error_string(error_code);
-  if (error_reason != NULL) return error_reason;
-  return strings::Substitute("SSL error $0", error_code);
-}
-
-Status SSLFactory::LoadCertificate(const std::string& certificate_path) {
+Status TlsContext::LoadCertificate(const string& certificate_path) {
   ERR_clear_error();
   errno = 0;
   if (SSL_CTX_use_certificate_file(ctx_.get(), certificate_path.c_str(), SSL_FILETYPE_PEM) != 1) {
-    return Status::NotFound(
-        "Failed to load certificate file '" + certificate_path + "': " + GetLastError(errno));
+    return Status::NotFound(Substitute("failed to load certificate file: '$0'", certificate_path),
+                            GetOpenSSLErrors());
   }
   return Status::OK();
 }
 
-Status SSLFactory::LoadPrivateKey(const std::string& key_path) {
+Status TlsContext::LoadPrivateKey(const string& key_path) {
   ERR_clear_error();
   errno = 0;
   if (SSL_CTX_use_PrivateKey_file(ctx_.get(), key_path.c_str(), SSL_FILETYPE_PEM) != 1) {
-    return Status::NotFound(
-        "Failed to load private key file '" + key_path + "': " + GetLastError(errno));
+    return Status::NotFound(Substitute("failed to load private key file: '$0'", key_path),
+                            GetOpenSSLErrors());
   }
   return Status::OK();
 }
 
-Status SSLFactory::LoadCertificateAuthority(const std::string& certificate_path) {
+Status TlsContext::LoadCertificateAuthority(const string& certificate_path) {
   ERR_clear_error();
   errno = 0;
   if (SSL_CTX_load_verify_locations(ctx_.get(), certificate_path.c_str(), nullptr) != 1) {
-    return Status::NotFound(
-        "Failed to load certificate authority file '" + certificate_path + "': " +
-            GetLastError(errno));
+    return Status::NotFound(Substitute("failed to load certificate authority file: '$0'",
+                                       certificate_path),
+                            GetOpenSSLErrors());
   }
   return Status::OK();
 }
 
-std::unique_ptr<SSLSocket> SSLFactory::CreateSocket(int socket_fd, bool is_server) {
+Status TlsContext::InitiateHandshake(TlsHandshakeType handshake_type,
+                                     TlsHandshake* handshake) const {
   CHECK(ctx_);
-  // Create SSL object and transfer ownership to the SSLSocket object created.
-  SSL* ssl = SSL_new(ctx_.get());
-  if (ssl == nullptr) {
-    return nullptr;
+  CHECK(!handshake->ssl_);
+  handshake->adopt_ssl(ssl_make_unique(SSL_new(ctx_.get())));
+  if (!handshake->ssl_) {
+    return Status::RuntimeError("failed to create SSL handle", GetOpenSSLErrors());
   }
-  std::unique_ptr<SSLSocket> socket(new SSLSocket(socket_fd, ssl, is_server));
-  return socket;
-  //return new SSLSocket(socket_fd, ssl, is_server);
+
+  SSL_set_bio(handshake->ssl(),
+              BIO_new(BIO_s_mem()),
+              BIO_new(BIO_s_mem()));
+
+  switch (handshake_type) {
+    case TlsHandshakeType::SERVER:
+      SSL_set_accept_state(handshake->ssl());
+      break;
+    case TlsHandshakeType::CLIENT:
+      SSL_set_connect_state(handshake->ssl());
+      break;
+  }
+
+  return Status::OK();
 }
 
+} // namespace security
 } // namespace kudu

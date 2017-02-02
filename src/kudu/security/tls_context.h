@@ -17,27 +17,27 @@
 
 #pragma once
 
+#include <functional>
 #include <string>
-#include <memory>
 
-#include "kudu/gutil/macros.h"
-#include "kudu/gutil/strings/substitute.h"
 #include "kudu/security/openssl_util.h"
-#include "kudu/util/errno.h"
+#include "kudu/security/tls_handshake.h"
 #include "kudu/util/status.h"
 
 namespace kudu {
+namespace security {
 
-class Sockaddr;
-class SSLSocket;
+// TlsContext wraps data required by the OpenSSL library for creating TLS
+// protected channels. A single TlsContext instance should be used per server or
+// client instance.
+class TlsContext {
 
-class SSLFactory {
  public:
-  SSLFactory();
 
-  ~SSLFactory();
+  TlsContext();
 
-  // Set up the SSL_CTX and choose encryption preferences.
+  ~TlsContext() = default;
+
   Status Init();
 
   // Load the server certificate.
@@ -49,17 +49,14 @@ class SSLFactory {
   // Load the certificate authority.
   Status LoadCertificateAuthority(const std::string& certificate_path);
 
-  // Create an SSLSocket wrapped around the file descriptor 'socket_fd'. 'is_server' denotes if it's
-  // a server socket. The 'socket_fd' is closed when this object is destroyed.
-  std::unique_ptr<SSLSocket> CreateSocket(int socket_fd, bool is_server);
+  // Initiates a new TlsHandshake instance.
+  Status InitiateHandshake(TlsHandshakeType handshake_type, TlsHandshake* handshake) const;
 
  private:
-  friend class SSLSocket;
-  std::unique_ptr<SSL_CTX, std::function<void(SSL_CTX*)>> ctx_;
 
-  // Gets the last error from the thread local SSL error queue. If no error exists, it returns
-  // the error corresponding to 'errno_copy'.
-  static std::string GetLastError(int errno_copy);
+  // Owned SSL context.
+  c_unique_ptr<SSL_CTX> ctx_;
 };
 
+} // namespace security
 } // namespace kudu

@@ -31,8 +31,8 @@ TP_BUILD_DIR="$TP_DIR/build"
 CLOUDFRONT_URL_PREFIX=http://d3dr9sfxru4sde.cloudfront.net
 
 PREFIX_COMMON=$TP_DIR/installed/common
-PREFIX_DEPS=$TP_DIR/installed/uninstrumented
-PREFIX_DEPS_TSAN=$TP_DIR/installed/tsan
+PREFIX_UNINSTRUMENTED=$TP_DIR/installed/uninstrumented
+PREFIX_TSAN=$TP_DIR/installed/tsan
 
 GFLAGS_VERSION=2.1.2
 GFLAGS_NAME=gflags-$GFLAGS_VERSION
@@ -58,7 +58,7 @@ CMAKE_VERSION=3.6.1
 CMAKE_NAME=cmake-$CMAKE_VERSION
 CMAKE_SOURCE=$TP_SOURCE_DIR/$CMAKE_NAME
 
-SNAPPY_VERSION=1.1.0
+SNAPPY_VERSION=1.1.4
 SNAPPY_NAME=snappy-$SNAPPY_VERSION
 SNAPPY_SOURCE=$TP_SOURCE_DIR/$SNAPPY_NAME
 
@@ -91,9 +91,7 @@ RAPIDJSON_SOURCE=$TP_SOURCE_DIR/$RAPIDJSON_NAME
 #  export NAME=squeasel-$(git rev-parse HEAD)
 #  git archive HEAD --prefix=$NAME/ -o /tmp/$NAME.tar.gz
 #  s3cmd put -P /tmp/$NAME.tar.gz s3://cloudera-thirdparty-libs/$NAME.tar.gz
-#
-# File a HD ticket for access to the cloudera-dev AWS instance to push to S3.
-SQUEASEL_VERSION=8ac777a122fccf0358cb8562e900f8e9edd9ed11
+SQUEASEL_VERSION=c304d3f3481b07bf153979155f02e0aab24d01de
 SQUEASEL_NAME=squeasel-$SQUEASEL_VERSION
 SQUEASEL_SOURCE=$TP_SOURCE_DIR/$SQUEASEL_NAME
 

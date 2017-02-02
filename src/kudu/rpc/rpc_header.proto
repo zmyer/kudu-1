@@ -71,41 +71,57 @@ enum RpcFeatureFlag {
   // The RPC system is required to support application feature flags in the
   // request and response headers.
   APPLICATION_FEATURE_FLAGS = 1;
+
+  // The RPC system supports TLS protected connections. If both sides support
+  // this flag, the connection will automatically be wrapped in a TLS protected
+  // channel following a TLS handshake.
+  TLS = 2;
 };
 
 // Message type passed back & forth for the SASL negotiation.
-message SaslMessagePB {
-  enum SaslState {
-    UNKNOWN   = 999;
-    SUCCESS   = 0;
-    NEGOTIATE = 1;
-    INITIATE  = 2;
-    CHALLENGE = 3;
-    RESPONSE  = 4;
+message NegotiatePB {
+  enum NegotiateStep {
+    UNKNOWN        = 999;
+    NEGOTIATE      = 1;
+    SASL_SUCCESS   = 0;
+    SASL_INITIATE  = 2;
+    SASL_CHALLENGE = 3;
+    SASL_RESPONSE  = 4;
+    TLS_HANDSHAKE  = 5;
   }
 
   message SaslAuth {
-    optional string method    = 1;  // Deprecated, but was 'required' in Kudu 0.5.0 and 0.6.0.
-    required string mechanism = 2;  // Standard SASL mechanism, i.e. ANONYMOUS, PLAIN, GSSAPI.
+    // The SASL mechanism, i.e. 'PLAIN' or 'GSSAPI'.
+    required string mechanism = 2;
 
-    // SASL challenge token from server, if the client chooses to use this method.
-    // Only used when the server is piggy-backing a challenge on a NEGOTIATE response.
-    // Otherwise, SaslMessagePB::token is used as the challenge token.
-    optional bytes challenge = 5 [(REDACT) = true];
+    // Deprecated: no longer used.
+    optional string DEPRECATED_method = 1;
+    optional bytes DEPRECATED_challenge = 5 [(REDACT) = true];
   }
 
-  // When the client sends its first NEGOTIATE message, it sends its set of supported
-  // RPC system features. In the response to this message, the server sends back its own.
-  // This allows the two peers to agree on whether newer extensions of the
-  // RPC system may be used on this connection. We use a list of features rather than
-  // a simple version number to make it easier for the Java and C++ clients to implement
-  // features in different orders while still maintaining compatibility, as well as
-  // to simplify backporting of features out-of-order.
+  // When the client sends its NEGOTIATE step message, it sends its set of
+  // supported RPC system features. In the response to this message, the server
+  // sends back its own. This allows the two peers to agree on whether newer
+  // extensions of the RPC system may be used on this connection. We use a list
+  // of features rather than a simple version number to make it easier for the
+  // Java and C++ clients to implement features in different orders while still
+  // maintaining compatibility, as well as to simplify backporting of features
+  // out-of-order.
   repeated RpcFeatureFlag supported_features = 1;
 
-  required SaslState state = 2;  // RPC system SASL state.
-  optional bytes token     = 3  [(REDACT) = true];
-  repeated SaslAuth auths  = 4;
+  // The current negotiation step.
+  required NegotiateStep step  = 2;
+
+  // The SASL token, containing either the challenge during the SASL_CHALLENGE
+  // step, or the response during the SASL_RESPONSE step.
+  optional bytes token         = 3 [(REDACT) = true];
+
+  // During the TLS_HANDSHAKE step, contains the TLS handshake message.
+  optional bytes tls_handshake = 5 [(REDACT) = true];
+
+  // During the NEGOTIATE step, contains the supported SASL mechanisms.
+  // During the SASL_INITIATE step, contains the single chosen SASL mechanism.
+  repeated SaslAuth auths      = 4;
 }
 
 message RemoteMethodPB {
@@ -193,7 +209,6 @@ message ResponseHeader {
   // These offsets are counted AFTER the message header, i.e., offset 0
   // is the first byte after the bytes for this protobuf.
   repeated uint32 sidecar_offsets = 3;
-
 }
 
 // Sent as response when is_error == true.
@@ -255,8 +270,20 @@ message ErrorStatusPB {
   extensions 100 to max;
 }
 
-// An option for RPC methods that allows to set whether that method's
-// RPC results should be tracked with a ResultTracker.
 extend google.protobuf.MethodOptions {
+  // An option for RPC methods that allows to set whether that method's
+  // RPC results should be tracked with a ResultTracker.
   optional bool track_rpc_result = 50006 [default=false];
+
+  // An option to set the authorization method for this particular
+  // RPC method. If this is not specified, the service's 'default_authz_method'
+  // is used.
+  optional string authz_method = 50007;
+}
+
+extend google.protobuf.ServiceOptions {
+  // Set the default authorization method for the RPCs in this service.
+  // If this is not set, then the default authorization is to allow all
+  // RPCs.
+  optional string default_authz_method = 50007;
 }

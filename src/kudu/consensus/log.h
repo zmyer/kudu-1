@@ -251,8 +251,8 @@ class Log : public RefCountedThreadSafe<Log> {
  private:
   friend class LogTest;
   friend class LogTestBase;
-  FRIEND_TEST(LogTest, TestMultipleEntriesInABatch);
-  FRIEND_TEST(LogTest, TestReadLogWithReplacedReplicates);
+  FRIEND_TEST(LogTestOptionalCompression, TestMultipleEntriesInABatch);
+  FRIEND_TEST(LogTestOptionalCompression, TestReadLogWithReplacedReplicates);
   FRIEND_TEST(LogTest, TestWriteAndReadToAndFromInProgressSegment);
 
   class AppendThread;
@@ -333,6 +333,8 @@ class Log : public RefCountedThreadSafe<Log> {
     return allocation_state_;
   }
 
+  std::string LogPrefix() const;
+
   LogOptions options_;
   FsManager *fs_manager_;
   std::string log_dir_;
@@ -411,6 +413,9 @@ class Log : public RefCountedThreadSafe<Log> {
   // Read-write lock to protect 'allocation_state_'.
   mutable RWMutex allocation_lock_;
   SegmentAllocationState allocation_state_;
+
+  // The codec used to compress entries, or nullptr if not configured.
+  const CompressionCodec* codec_;
 
   scoped_refptr<MetricEntity> metric_entity_;
   gscoped_ptr<LogMetrics> metrics_;

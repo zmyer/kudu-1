@@ -649,8 +649,8 @@ TEST_F(DeleteTableTest, TestAutoTombstoneAfterTabletCopyRemoteFails) {
   {
     vector<ListTabletsResponsePB::StatusAndSchemaPB> status_pbs;
     ASSERT_OK(WaitForNumTabletsOnTS(ts, 1, kTimeout, &status_pbs));
-    ASSERT_STR_CONTAINS(status_pbs[0].tablet_status().last_status(),
-                        "Tombstoned tablet: Tablet Copy: Unable to fetch data from remote peer");
+    ASSERT_STR_MATCHES(status_pbs[0].tablet_status().last_status(),
+                       "Tablet Copy: Tombstoned tablet .*: Tablet copy aborted");
   }
 
   // Now bring the other replicas back, re-elect the previous leader (TS-1),
@@ -1010,8 +1010,10 @@ TEST_F(DeleteTableTest, TestWebPageForTombstonedTablet) {
 
   // Tombstone the tablet.
   ExternalTabletServer* ets = cluster_->tablet_server(0);
-  ASSERT_OK(itest::DeleteTablet(ts_map_[ets->uuid()],
-                                tablet_id, TABLET_DATA_TOMBSTONED, boost::none, timeout));
+  AssertEventually([&]() {
+    ASSERT_OK(itest::DeleteTablet(ts_map_[ets->uuid()],
+                                  tablet_id, TABLET_DATA_TOMBSTONED, boost::none, timeout));
+  });
 
   // Check the various web pages associated with the tablet, ensuring
   // they don't crash and at least have the tablet ID within them.

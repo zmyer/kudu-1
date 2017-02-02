@@ -20,13 +20,12 @@
 #include <string>
 #include <vector>
 
-#include "kudu/cfile/cfile.pb.h"
+#include "kudu/util/compression/compression.pb.h"
 #include "kudu/gutil/macros.h"
 #include "kudu/util/slice.h"
 #include "kudu/util/status.h"
 
 namespace kudu {
-namespace cfile {
 
 class CompressionCodec {
  public:
@@ -56,6 +55,9 @@ class CompressionCodec {
   // Returns the maximal size of the compressed representation of
   // input data that is "source_bytes" bytes in length.
   virtual size_t MaxCompressedLength(size_t source_bytes) const = 0;
+
+  // Return the type of compression implemented by this codec.
+  virtual CompressionType type() const = 0;
  private:
   DISALLOW_COPY_AND_ASSIGN(CompressionCodec);
 };
@@ -69,6 +71,5 @@ Status GetCompressionCodec(CompressionType compression,
 // Returns the compression codec type given the name
 CompressionType GetCompressionCodecType(const std::string& name);
 
-} // namespace cfile
 } // namespace kudu
 #endif

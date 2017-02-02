@@ -27,13 +27,13 @@
 #include "kudu/cfile/block_pointer.h"
 #include "kudu/cfile/cfile.pb.h"
 #include "kudu/cfile/cfile_writer.h"
-#include "kudu/cfile/compression_codec.h"
 #include "kudu/cfile/index_block.h"
 #include "kudu/cfile/index_btree.h"
 #include "kudu/gutil/gscoped_ptr.h"
 #include "kudu/gutil/mathlimits.h"
 #include "kudu/gutil/strings/substitute.h"
 #include "kudu/util/coding.h"
+#include "kudu/util/compression/compression_codec.h"
 #include "kudu/util/debug/trace_event.h"
 #include "kudu/util/flag_tags.h"
 #include "kudu/util/malloc.h"
@@ -253,7 +253,7 @@ namespace {
 // the memory can be released using 'release()'.
 class ScratchMemory {
  public:
-  ScratchMemory() : cache_(nullptr), ptr_(nullptr), size_(-1) {}
+  ScratchMemory() : ptr_(nullptr), size_(-1) {}
   ~ScratchMemory() {
     if (!ptr_) return;
     if (!from_cache_.valid()) {
@@ -316,7 +316,6 @@ class ScratchMemory {
   }
 
  private:
-  BlockCache* cache_;
   BlockCache::PendingEntry from_cache_;
   uint8_t* ptr_;
   int size_;

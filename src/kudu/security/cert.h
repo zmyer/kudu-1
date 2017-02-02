@@ -17,40 +17,33 @@
 
 #pragma once
 
-#include <sys/uio.h>
-
 #include <string>
 
-#include "kudu/gutil/macros.h"
 #include "kudu/security/openssl_util.h"
-#include "kudu/util/net/socket.h"
-#include "kudu/util/status.h"
+
+// Forward declarations for the OpenSSL typedefs.
+typedef struct x509_st X509;
+typedef struct X509_req_st X509_REQ;
 
 namespace kudu {
 
-class Sockaddr;
+class Status;
 
-class SSLSocket : public Socket {
+namespace security {
+
+class Cert : public RawDataWrapper<X509> {
  public:
-  SSLSocket(int fd, SSL* ssl, bool is_server);
-
-  ~SSLSocket();
-
-  // Do the SSL handshake as a client or a server and verify that the credentials were correctly
-  // verified.
-  Status DoHandshake();
-
-  Status Write(const uint8_t *buf, int32_t amt, int32_t *nwritten) override;
-
-  Status Writev(const struct ::iovec *iov, int iov_len, int32_t *nwritten) override;
-
-  Status Recv(uint8_t *buf, int32_t amt, int32_t *nread) override;
-
-  // Shutdown the connection and free the SSL state for this connection.
-  Status Close() override;
- private:
-  SSL* ssl_; // Owned.
-  bool is_server_;
+  Status FromString(const std::string& data, DataFormat format);
+  Status ToString(std::string* data, DataFormat format) const;
+  Status FromFile(const std::string& fpath, DataFormat format);
 };
 
+class CertSignRequest : public RawDataWrapper<X509_REQ> {
+ public:
+  Status FromString(const std::string& data, DataFormat format);
+  Status ToString(std::string* data, DataFormat format) const;
+  Status FromFile(const std::string& fpath, DataFormat format);
+};
+
+} // namespace security
 } // namespace kudu
